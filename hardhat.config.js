@@ -7,7 +7,7 @@ const { alchemyApiKey, ropstenPrivateKey } = require('./secrets.json');
  * @type import('hardhat/config').HardhatUserConfig
  */
 module.exports = {
-  solidity: "0.8.2",
+  solidity: "0.8.9",
   networks: {
     ropsten: {
       url: `https://eth-ropsten.alchemyapi.io/v2/${alchemyApiKey}`,

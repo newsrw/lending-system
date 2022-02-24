@@ -1,13 +1,13 @@
 const main = async () => {
     const [deployer] = await ethers.getSigners();
-
     console.log("Deploying contracts with the account:", deployer.address);
 
-    const Token = await hre.ethers.getContractFactory("SpellToken");
-    const token = await Token.deploy();
+    const Vault = await hre.ethers.getContractFactory("Vault");
+    const vault = await Vault.deploy();
+    console.log("Deploying Vault...");
 
-    await token.deployed();
-    console.log("Token deployed to: ", token.address);
+    await vault.deployed();
+    console.log("Vault deployed to: ", vault.address);
 }
 
 const runMain = async () => {
