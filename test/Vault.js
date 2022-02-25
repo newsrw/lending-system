@@ -74,8 +74,6 @@ describe("Vault", () => {
         const Vault = (await ethers.getContractFactory("Vault", deployer));
         vault = await Vault.deploy();
 
-        // Whitelist market to allow market to access funds in Clerk
-        await clerk.whitelistMarket(vault.address, true);
         // Mint SPELL to deployer
         await spell.mint(deployerAddress, ethers.utils.parseEther("8888888888"));
         // Increase timestamp by 1 day to allow more SPELL to be minted

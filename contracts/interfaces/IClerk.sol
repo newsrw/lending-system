@@ -30,13 +30,6 @@ interface IClerk {
         uint256 share
     );
 
-    event LogWhiteListMarket(address indexed market, bool approved);
-    event LogTokenToMarkets(
-        address indexed market,
-        address indexed token,
-        bool approved
-    );
-
     function balanceOf(IERC20Upgradeable, address)
         external
         view
@@ -73,10 +66,6 @@ interface IClerk {
         address to,
         uint256 share
     ) external;
-
-    function whitelistMarket(address market, bool approved) external;
-
-    function whitelistedMarkets(address) external view returns (bool);
 
     function withdraw(
         IERC20Upgradeable token_,
