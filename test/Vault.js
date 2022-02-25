@@ -68,13 +68,9 @@ describe("Vault", () => {
     let magic;
     let spell;
 
-    // oracle
-    let offChainOracle;
-    let compositeOracle;
-
     let clerk;
 
-    let vaultMarket;
+    let vault;
     let vaultConfig;
 
     // contract account
@@ -110,46 +106,8 @@ describe("Vault", () => {
 
         // Deploy MagicToken
         const MagicToken = (await ethers.getContractFactory("MagicToken"));
-        magic = await MagicToken.deploy();
+        magic = await ethers.deployProxy(MagicToken, []);
         await magic.mint(deployerAddress, ethers.utils.parseEther("1681688"));
-
-        // Deploy Oracles
-        // Use Offchain Oracle for easy testing
-        const OffChainOracle = (await ethers.getContractFactory("OffChainOracle", deployer));
-        offChainOracle = await OffChainOracle.deploy([]);
-        await offChainOracle.grantRole(ethers.utils.solidityKeccak256(["string"], ["FEEDER_ROLE"]), deployerAddress);
-
-        // Feed offchain price
-        await offChainOracle.setPrices([magic.address], [ethers.utils.parseEther("1")]);
-
-        // Expect offchain price to be 1
-        let [updated, price] = await offChainOracle.get(
-            ethers.utils.defaultAbiCoder.encode(["address"], [magic.address])
-        );
-        expect(updated).to.be.true;
-        expect(price).to.eq(ethers.utils.parseEther("1"));
-
-        const CompositeOracle = (await ethers.getContractFactory("CompositeOracle", deployer));
-        compositeOracle = await CompositeOracle.deploy([15 * 60]);
-        await compositeOracle.setPrimarySources(
-            magic.address,
-            MAX_PRICE_DEVIATION,
-            [offChainOracle.address],
-            [ethers.utils.defaultAbiCoder.encode(["address"], [magic.address])]
-        );
-
-        await compositeOracle.setPrices([ethers.utils.defaultAbiCoder.encode(["address"], [magic.address])]);
-
-        // skip time to avoid time delay
-        await increaseTimestamp(duration.minutes(BigNumber.from("15")));
-
-        // set price once again to let the `nextPrice` of a previous setPrices call move to `currentPrice)
-        await compositeOracle.setPrices([ethers.utils.defaultAbiCoder.encode(["address"], [magic.address])]);
-
-        // Expect composite oracle can query from offchain oracle
-        [updated, price] = await compositeOracle.get(ethers.utils.defaultAbiCoder.encode(["address"], [magic.address]));
-        expect(updated).to.be.true;
-        expect(price).to.eq(ethers.utils.parseEther("1"));
 
         // Deploy Clerk
         const Clerk = (await ethers.getContractFactory("Clerk", deployer));
@@ -169,50 +127,29 @@ describe("Vault", () => {
         // Deploy vaultMarket
         // Assuming 0.5% interest rate per year
         // Assuming 85% collateralization ratio
-        const VaultMarket = (await ethers.getContractFactory("Vault", deployer));
-        vaultMarket = await VaultMarket.deploy(
-            clerk.address,
-            spell.address,
-            magic.address,
-            vaultConfig.address,
-            compositeOracle.address,
-            ethers.utils.defaultAbiCoder.encode(["address"], [magic.address]),
-        );
+        const Vault = (await ethers.getContractFactory("Vault", deployer));
+        // vault = await Vault.deploy(
+        //     [
+        //         clerk.address,
+        //         spell.address,
+        //         magic.address,
+        //         vaultConfig.address
+        //     ]
+        // );
+        vault = await Vault.deploy();
 
         // Whitelist market to allow market to access funds in Clerk
-        await clerk.whitelistMarket(vaultMarket.address, true);
+        await clerk.whitelistMarket(vault.address, true);
         // Mint SPELL to deployer
         await spell.mint(deployerAddress, ethers.utils.parseEther("8888888888"));
         // Increase timestamp by 1 day to allow more SPELL to be minted
         await increaseTimestamp(DAY);
         // Assuming someone try to borrow SPELL from vaultMarket when it is not setup yet
         await magic.approve(clerk.address, ethers.constants.MaxUint256);
-        await expect(
-            vaultMarket.depositAndBorrow(
-                deployerAddress,
-                ethers.utils.parseEther("10000000"),
-                ethers.utils.parseEther("8500000"),
-                ethers.utils.parseEther("1"),
-                ethers.utils.parseEther("1")
-            ),
-            "if oracle get stale > 1 day, it will be reverted as no valid source"
-        ).to.be.revertedWith("CompositeOracle::get::price stale");
-        // Feed offchain price again
-        await offChainOracle.setPrices([magic.address], [ethers.utils.parseEther("1")]);
-        // update composit oracle price after offchain feeding the latest price
-        await compositeOracle.setPrices([ethers.utils.defaultAbiCoder.encode(["address"], [magic.address])]);
-        await expect(
-            vaultMarket.depositAndBorrow(
-                deployerAddress,
-                ethers.utils.parseEther("10000000"),
-                ethers.utils.parseEther("8500000"),
-                ethers.utils.parseEther("1"),
-                ethers.utils.parseEther("1")
-            )
-        ).to.be.revertedWith("bad collateralFactor");
+
         // Config market
         await vaultConfig.setConfig(
-            [vaultMarket.address],
+            [vault.address],
             [
                 {
                     collateralFactor: MAX_COLLATERAL_RATIO,
@@ -223,7 +160,7 @@ describe("Vault", () => {
         );
         // // Connect contracts to Alice
         magicAsAlice = magic.connect(magic.address, alice);
-        vaultMarketAsAlice = magic.connect(vaultMarket.address, alice);
+        vaultMarketAsAlice = magic.connect(vault.address, alice);
         spellAsAlice = spell.connect(spell.address, alice);
 
         // Transfer magic to Alice and Bob
@@ -241,98 +178,74 @@ describe("Vault", () => {
 
     describe("#initialzied", async () => {
         it("should be initialized", async () => {
-            expect(await vaultMarket.clerk()).to.equal(clerk.address);
-            expect(await vaultMarket.spell()).to.equal(spell.address);
-            expect(await vaultMarket.collateral()).to.equal(magic.address);
-            expect(await vaultMarket.oracle()).to.equal(compositeOracle.address);
-            expect(await vaultMarket.oracleData()).to.equal(
-                ethers.utils.defaultAbiCoder.encode(["address"], [magic.address])
-            );
-            expect(await vaultConfig.interestPerSecond(vaultMarket.address)).to.equal(
+            expect(await vault.clerk()).to.equal(clerk.address);
+            expect(await vault.spell()).to.equal(spell.address);
+            expect(await vault.collateral()).to.equal(magic.address);
+            expect(await vaultConfig.interestPerSecond(vault.address)).to.equal(
                 ethers.utils.parseEther("0.005").div(365 * 24 * 60 * 60)
             );
-            expect(await vaultConfig.collateralFactor(vaultMarket.address, deployerAddress)).to.equal(
+            expect(await vaultConfig.collateralFactor(vault.address, deployerAddress)).to.equal(
                 MAX_COLLATERAL_RATIO
             );
         });
     });
 
-    // describe("#accrue", async () => {
-    //     it("should accrue interest correctly", async () => {
-    //         // preparation
-    //         const stages: any = {};
-    //         const collateralAmount = ethers.utils.parseEther("10000000");
-    //         const borrowAmount = ethers.utils.parseEther("1000000");
+    describe("#accrue", async () => {
+        it("should accrue interest correctly", async () => {
+            // preparation
+            const stages = {};
+            const collateralAmount = ethers.utils.parseEther("10000000");
+            const borrowAmount = ethers.utils.parseEther("1000000");
 
-    //         // Move timestamp to start of the week for easy testing
-    //         await timeHelpers.setTimestamp(
-    //             (await timeHelpers.latestTimestamp()).div(timeHelpers.WEEK).add(1).mul(timeHelpers.WEEK)
-    //         );
+            // Move timestamp to start of the week for easy testing
+            await timeHelpers.setTimestamp(
+                (await timeHelpers.latestTimestamp()).div(timeHelpers.WEEK).add(1).mul(timeHelpers.WEEK)
+            );
 
-    //         // set price to prevent no valid source in case of stale
-    //         await offChainOracle.setPrices([magic.address], [usdt.address], [ethers.utils.parseEther("1")]);
-    //         await timeHelpers.increaseTimestamp(timeHelpers.duration.minutes(BigNumber.from("15")));
-    //         await compositeOracle.setPrices([ethers.utils.defaultAbiCoder.encode(["address"], [magic.address])]);
+            // Assuming Alice deposit "collateralAmount" MAGIC and borrow "borrowAmount" SPELL
+            const aliceSpellBefore = await spell.balanceOf(aliceAddress);
+            await magicMarketAsAlice.depositAndBorrow(
+                aliceAddress,
+                collateralAmount,
+                borrowAmount,
+                ethers.utils.parseEther("1"),
+                ethers.utils.parseEther("1")
+            );
+            const aliceSpellAfter = await spell.balanceOf(aliceAddress);
+            stages["aliceBorrow"] = [await timeHelpers.latestTimestamp(), await timeHelpers.latestBlockNumber()];
 
-    //         // Assuming Alice deposit "collateralAmount" MAGIC and borrow "borrowAmount" SPELL
-    //         const aliceSpellBefore = await spell.balanceOf(aliceAddress);
-    //         await magicMarketAsAlice.depositAndBorrow(
-    //             aliceAddress,
-    //             collateralAmount,
-    //             borrowAmount,
-    //             ethers.utils.parseEther("1"),
-    //             ethers.utils.parseEther("1")
-    //         );
-    //         const aliceSpellAfter = await spell.balanceOf(aliceAddress);
-    //         stages["aliceBorrow"] = [await timeHelpers.latestTimestamp(), await timeHelpers.latestBlockNumber()];
+            expect(aliceSpellAfter.sub(aliceSpellBefore)).to.be.eq(borrowAmount);
 
-    //         expect(aliceSpellAfter.sub(aliceSpellBefore)).to.be.eq(borrowAmount);
+            // Move timestamp to 52 weeks since Alice borrowed "borrowAmount" SPELL
+            await timeHelpers.setTimestamp(
+                (await timeHelpers.latestTimestamp()).div(timeHelpers.WEEK).add(52).mul(timeHelpers.WEEK)
+            );
+            stages["oneYearAfter"] = [await timeHelpers.latestTimestamp(), await timeHelpers.latestBlockNumber()];
 
-    //         // Move timestamp to 52 weeks since Alice borrowed "borrowAmount" SPELL
-    //         await timeHelpers.setTimestamp(
-    //             (await timeHelpers.latestTimestamp()).div(timeHelpers.WEEK).add(52).mul(timeHelpers.WEEK)
-    //         );
-    //         stages["oneYearAfter"] = [await timeHelpers.latestTimestamp(), await timeHelpers.latestBlockNumber()];
+            // Deposit 0 to accrue interest
+            await vault.deposit(spell.address, deployerAddress, 0);
+            stages["accrue"] = [await timeHelpers.latestTimestamp(), await timeHelpers.latestBlockNumber()];
 
-    //         // set price to prevent no valid source in case of stale
-    //         await offChainOracle.setPrices([magic.address], [usdt.address], [ethers.utils.parseEther("1")]);
-    //         await timeHelpers.increaseTimestamp(timeHelpers.duration.minutes(BigNumber.from("15")));
-    //         await compositeOracle.setPrices([ethers.utils.defaultAbiCoder.encode(["address"], [magic.address])]);
+            const timePast = stages["accrue"][0].sub(stages["aliceBorrow"][0]);
+            const expectedSurplus = borrowAmount.mul(timePast).mul(INTEREST_PER_SECOND).div(ethers.constants.WeiPerEther);
+            expect(await vault.lastAccrueTime()).to.be.eq(stages["accrue"][0]);
+            expect(await vault.surplus()).to.be.eq(expectedSurplus);
+            expect(await vault.totalDebtShare()).to.be.eq(borrowAmount);
+            expect(await vault.totalDebtValue()).to.be.eq(borrowAmount.add(expectedSurplus));
 
-    //         // Deposit 0 to accrue interest
-    //         await vaultMarket.deposit(spell.address, deployerAddress, 0);
-    //         stages["accrue"] = [await timeHelpers.latestTimestamp(), await timeHelpers.latestBlockNumber()];
+            // Deployer withdraw surplus
+            await vault.withdrawSurplus();
+            const deployerSpellBefore = await spell.balanceOf(deployerAddress);
+            await clerk.withdraw(spell.address, deployerAddress, deployerAddress, expectedSurplus, 0);
+            const deployerSpellAfter = await spell.balanceOf(deployerAddress);
 
-    //         const timePast = stages["accrue"][0].sub(stages["aliceBorrow"][0]);
-    //         const expectedSurplus = borrowAmount.mul(timePast).mul(INTEREST_PER_SECOND).div(ethers.constants.WeiPerEther);
-    //         expect(await vaultMarket.lastAccrueTime()).to.be.eq(stages["accrue"][0]);
-    //         expect(await vaultMarket.surplus()).to.be.eq(expectedSurplus);
-    //         expect(await vaultMarket.totalDebtShare()).to.be.eq(borrowAmount);
-    //         expect(await vaultMarket.totalDebtValue()).to.be.eq(borrowAmount.add(expectedSurplus));
-
-    //         // Deployer withdraw surplus
-    //         await vaultMarket.withdrawSurplus();
-    //         const deployerSpellBefore = await spell.balanceOf(deployerAddress);
-    //         await clerk.withdraw(spell.address, deployerAddress, deployerAddress, expectedSurplus, 0);
-    //         const deployerSpellAfter = await spell.balanceOf(deployerAddress);
-
-    //         expect(deployerSpellAfter.sub(deployerSpellBefore)).to.be.eq(expectedSurplus);
-    //     });
-    // });
+            expect(deployerSpellAfter.sub(deployerSpellBefore)).to.be.eq(expectedSurplus);
+        });
+    });
 
     describe("#depositAndBorrow", async () => {
         context("when price went below _minPrice", async () => {
             it("should revert", async () => {
-                // preparation
-                // set price to 0.5
-                await offChainOracle.setPrices([magic.address], [usdt.address], [ethers.utils.parseEther("0.5")]);
-
-                // clear the price cache
-                await increaseTimestamp(duration.minutes(BigNumber.from("15")));
-                await compositeOracle.setPrices([ethers.utils.defaultAbiCoder.encode(["address"], [magic.address])]);
-                await increaseTimestamp(duration.minutes(BigNumber.from("15")));
-                await compositeOracle.setPrices([ethers.utils.defaultAbiCoder.encode(["address"], [magic.address])]);
-
                 await expect(
                     vaultMarketAsAlice.depositAndBorrow(
                         aliceAddress,
@@ -347,16 +260,6 @@ describe("Vault", () => {
 
         context("when price went above _maxPrice", async () => {
             it("should revert", async () => {
-                // preparation
-                // set price to 1.5
-                await offChainOracle.setPrices([magic.address], [usdt.address], [ethers.utils.parseEther("1.5")]);
-
-                // clear the price cache
-                await increaseTimestamp(duration.minutes(BigNumber.from("15")));
-                await compositeOracle.setPrices([ethers.utils.defaultAbiCoder.encode(["address"], [magic.address])]);
-                await increaseTimestamp(duration.minutes(BigNumber.from("15")));
-                await compositeOracle.setPrices([ethers.utils.defaultAbiCoder.encode(["address"], [magic.address])]);
-
                 await expect(
                     vaultMarketAsAlice.depositAndBorrow(
                         aliceAddress,
@@ -388,7 +291,7 @@ describe("Vault", () => {
         context("when there is no SPELL left to borrow", async () => {
             it("should revert", async () => {
                 // Reduce supply of SPELL to 0
-                await vaultMarket.reduceSupply(await clerk.balanceOf(spell.address, vaultMarket.address));
+                await vault.reduceSupply(await clerk.balanceOf(spell.address, vault.address));
 
                 // Assuming MAGIC worth 1 USD
                 // Alice deposit 10,000,000 MAGIC and borrow 1 wei of SPELL
