@@ -16,4 +16,5 @@
 ## Deployment
 - npx hardhat run scripts/deploy/token.js --network ropsten
 - npx hardhat run scripts/deploy/vault.js --network ropsten
-
+- npx hardhat run scripts/deploy/vaultConfig.js --network ropsten
+- npx hardhat run scripts/deploy/clerk.js --network ropsten
