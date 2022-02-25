@@ -15,7 +15,6 @@ contract Vault is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     using SafeERC20Upgradeable for IERC20Upgradeable;
 
     /// @dev Events
-    event LogUpdateCollateralPrice(uint256 newPirce);
     event LogAccrue(uint256 amount);
     event LogAddCollateral(
         address indexed from,
