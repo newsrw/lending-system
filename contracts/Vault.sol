@@ -7,7 +7,6 @@ import "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.
 import "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol";
 
-import "./interfaces/IOracle.sol";
 import "./interfaces/IVaultConfig.sol";
 import "./interfaces/IClerk.sol";
 
@@ -41,8 +40,6 @@ contract Vault is OwnableUpgradeable, ReentrancyGuardUpgradeable {
 
     /// @dev Market configuration states.
     IERC20Upgradeable public collateral;
-    IOracle public oracle;
-    bytes public oracleData;
 
     /// @dev Global states of the market
     uint256 public totalCollateralShare;
@@ -72,9 +69,7 @@ contract Vault is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         IClerk _clerk,
         IERC20Upgradeable _spell,
         IERC20Upgradeable _collateral,
-        IVaultConfig _marketConfig,
-        IOracle _oracle,
-        bytes calldata _oracleData
+        IVaultConfig _marketConfig
     ) external initializer {
         OwnableUpgradeable.__Ownable_init();
         ReentrancyGuardUpgradeable.__ReentrancyGuard_init();
@@ -89,14 +84,11 @@ contract Vault is OwnableUpgradeable, ReentrancyGuardUpgradeable {
             address(_marketConfig) != address(0),
             "marketConfig cannot be address(0)"
         );
-        require(address(_oracle) != address(0), "oracle cannot be address(0)");
 
         clerk = _clerk;
         spell = _spell;
         collateral = _collateral;
         marketConfig = _marketConfig;
-        oracle = _oracle;
-        oracleData = _oracleData;
     }
 
     /// @notice Accrue interest and realized surplus.
@@ -196,17 +188,6 @@ contract Vault is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         emit LogAddCollateral(msg.sender, _to, _share);
     }
 
-    /// @notice Update collateral price and check slippage
-    modifier updateCollateralPriceWithSlippageCheck(
-        uint256 _minPrice,
-        uint256 _maxPrice
-    ) {
-        (bool _update, uint256 _price) = updateCollateralPrice();
-        require(_update, "bad price");
-        require(_price >= _minPrice && _price <= _maxPrice, "slippage");
-        _;
-    }
-
     /// @notice Adds `collateral` from msg.sender to the account `to`.
     /// @param _to The receiver of the tokens.
     /// @param _amount The amount of collateral to be added to "_to".
@@ -262,16 +243,10 @@ contract Vault is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     /// @dev "checkSafe" modifier prevents msg.sender from borrow > collateralFactor
     /// @param _to The address to received borrowed SPELL
     /// @param _borrowAmount The amount of SPELL to be borrowed
-    function borrow(
-        address _to,
-        uint256 _borrowAmount,
-        uint256 _minPrice,
-        uint256 _maxPrice
-    )
+    function borrow(address _to, uint256 _borrowAmount)
         external
         nonReentrant
         accrue
-        updateCollateralPriceWithSlippageCheck(_minPrice, _maxPrice)
         checkSafe
         returns (uint256 _debtShare, uint256 _share)
     {
@@ -324,21 +299,11 @@ contract Vault is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     /// @param _to The address to received borrowed SPELL
     /// @param _collateralAmount The amount of collateral to be deposited
     /// @param _borrowAmount The amount of SPELL to be borrowed
-    /// @param _minPrice The minimum price of SPELL to be borrowed to prevent slippage
-    /// @param _maxPrice The maximum price of SPELL to be borrowed to prevent slippage
     function depositAndBorrow(
         address _to,
         uint256 _collateralAmount,
-        uint256 _borrowAmount,
-        uint256 _minPrice,
-        uint256 _maxPrice
-    )
-        external
-        nonReentrant
-        accrue
-        updateCollateralPriceWithSlippageCheck(_minPrice, _maxPrice)
-        checkSafe
-    {
+        uint256 _borrowAmount
+    ) external nonReentrant accrue checkSafe {
         // 1. Deposit collateral to the Vault
         (, uint256 _shareOut) = _vaultDeposit(
             collateral,
@@ -355,22 +320,6 @@ contract Vault is OwnableUpgradeable, ReentrancyGuardUpgradeable {
 
         // 4. Withdraw SPELL from Vault to "_to"
         _vaultWithdraw(spell, _to, _borrowAmount, 0);
-    }
-
-    /// @notice Update collateral price from Oracle.
-    function updateCollateralPrice()
-        public
-        returns (bool _updated, uint256 _price)
-    {
-        (_updated, _price) = oracle.get(oracleData);
-
-        if (_updated) {
-            collateralPrice = _price;
-            emit LogUpdateCollateralPrice(_price);
-        } else {
-            // Return the old rate if fetching wasn't successful
-            _price = collateralPrice;
-        }
     }
 
     /// @notice Perform deposit token from msg.sender and credit token's balance to "_to"

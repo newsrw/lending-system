@@ -33,11 +33,6 @@ contract Clerk is IClerk, OwnableUpgradeable {
     /// @notice if the market has been whitelisted it will be set into tokenToMarkets
     mapping(address => address) public tokenToMarket;
 
-    struct StrategyData {
-        uint64 targetBps;
-        uint128 balance; // the balance of the strategy that Clerk thinks is in there
-    }
-
     uint256 private constant MINIMUM_SHARE_BALANCE = 1000; // To prevent the ratio going off from tiny share
 
     // Balance per token per address/contract in shares
@@ -107,11 +102,7 @@ contract Clerk is IClerk, OwnableUpgradeable {
     }
 
     /// @notice Enables or disables a contract for approval
-    function whitelistMarket(address _market, bool _approved)
-        public
-        override
-        onlyOwner
-    {
+    function whitelistMarket(address _market, bool _approved) public override {
         // Checks
         require(
             _market != address(0),
@@ -257,30 +248,6 @@ contract Clerk is IClerk, OwnableUpgradeable {
         balanceOf[_token][_from] = balanceOf[_token][_from] - _share;
         balanceOf[_token][_to] = balanceOf[_token][_to] + _share;
 
-        // _internalTransferUpdate(
-        //     _token,
-        //     _from,
-        //     _to,
-        //     balanceOf[_token][_from],
-        //     balanceOf[_token][_to]
-        // );
-
         emit LogTransfer(_token, _from, _to, _share);
     }
-
-    // /// @dev when transfer occurs, call the strategy to notify the update, in case that the yield strategy requires an update during a balance change
-    // function _internalTransferUpdate(
-    //     IERC20Upgradeable _token,
-    //     address _from,
-    //     address _to,
-    //     uint256 _fromNewBalance,
-    //     uint256 _toNewBalance
-    // ) internal {
-    //     IStrategy _strategy = strategy[_token];
-
-    //     if (address(_strategy) == address(0)) return;
-    //     _strategy.update(
-    //         abi.encode(_from, _to, _fromNewBalance, _toNewBalance)
-    //     );
-    // }
 }
